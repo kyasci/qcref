@@ -1,0 +1,26 @@
+OBJ = eval.o basis.o mtrx.o rhf.o ci.o uhf.o rohf.o uga.o
+TARGET = libugaci.a
+.SUFFIXES =  .f .o
+
+.f.o:
+	$(FC) $(FCFLAGS) -c $<
+
+build: $(TARGET)
+
+$(TARGET): $(OBJ)
+	ar rc $(TARGET) $(OBJ)
+
+test:
+	@for i in eval.f basis.f rhf.f uhf.f rohf.f uga.f ci.f ; do \
+	    python3 _unittest.py $${i} ; \
+	done \
+
+clean:
+	$(RM) *.mod $(TARGET) $(OBJ)
+
+ci.o: uga.o
+uga.o: mtrx.o
+rhf.o: mtrx.o
+uhf.o: mtrx.o
+rohf.o: mtrx.o uhf.o
+basis.o: eval.o
