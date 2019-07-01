@@ -2,11 +2,12 @@
         ! Unitary group approach configuration interaction (UGA-CI).
         ! Reference:
         !   J. Paldus, J. Chem. Phys. 61, 5321 (1974).
+!$      use omp_lib
         implicit none
         private
         real(8),parameter::TOL_=1d-10,TOL_CC_=1d-5
         logical::init_=.false.
-        integer::lbfnz_=1000000,nnz_
+        integer::lbfnz_=1000000,lbfnzp_=30000,nnz_
         integer,allocatable::lnz1_(:,:),idxnz_(:),mcr_(:),mrc_(:)
         real(8),allocatable::vnz1_(:)
         !---------------------------------------------------------------
@@ -155,7 +156,6 @@
         end subroutine
 
         subroutine mknz1_(nfc,nac,lpaldus)
-!$        use omp_lib
           ! Nonzero values for 1e coupling constants (CAS).
           implicit none
           integer,intent(in)::nfc,nac,lpaldus(:,:,:)
@@ -165,11 +165,11 @@
           real(8),allocatable::vibuf(:,:)
           ! Get memory.
           nc=SIZE(lpaldus(1,1,:))
-          allocate(lnnz(nc),libuf(4,lbfnz_,nc),vibuf(lbfnz_,nc))
+          allocate(lnnz(nc),libuf(4,lbfnzp_,nc),vibuf(lbfnzp_,nc))
           lnnz(:)=0
           ! Evaluate non-zero coupling constants.
-!$omp     parallel private(ic,jc,im,jm,a1)
-!$omp     do
+!$omp     parallel private(ic,jc,im,jm,a1) 
+!$omp     do schedule(dynamic, 10)
           do ic=1,nc
             do jc=1,ic
               do im=nfc+1,nfc+nac
@@ -177,8 +177,8 @@
                   call evalcc1_(ic,jc,im,jm,nfc,lpaldus,a1)
                   if (ABS(a1)>TOL_CC_) then
                     lnnz(ic)=lnnz(ic)+1
-                    if (lnnz(ic)>lbfnz_) then
-                      write(*,'("error: nnz_>lbfnz_: ci.mknzcas_()")')
+                    if (lnnz(ic)>lbfnzp_) then
+                      write(*,'("error: nnz_>lbfnzp_: ci.mknzcas_()")')
                       stop 1
                     end if
                     libuf(:,lnnz(ic),ic)=(/ic,jc,im,jm/)
@@ -286,11 +286,11 @@
           istart=MINVAL(lnz1_(3,:))
           istop=MAXVAL(lnz1_(3,:))
           nc=SIZE(mcr_)
-          allocate(lnnz(nc),libuf(6,lbfnz_,nc),vibuf(lbfnz_,nc))
+          allocate(lnnz(nc),libuf(6,lbfnzp_,nc),vibuf(lbfnzp_,nc))
           lnnz(:)=0
           nr=SIZE(mrc_)
 !$omp     parallel private(ir,ic,im,jm,kc,jr,km,lm,jc,a1,a2)
-!$omp     do
+!$omp     do schedule(dynamic,10)
           do ir=1,nr
             ic=mrc_(ir)
             do im=istart,istop
@@ -309,8 +309,9 @@
                           cycle
                         end if
                         lnnz(ic)=lnnz(ic)+1
-                        if (nnz2>lbfnz_) then
-                          write(*,'("error: nnz2>lbfnz_: ci.mknz2_()")')
+                        if (lnnz(ic)>lbfnzp_) then
+                          write(*,
+     &                      '("error: lnnz(ic)>lbfnzp_: ci.mknz2_()")')
                           stop 1
                         end if
                         libuf(:,lnnz(ic),ic)=(/ir,jr,im,jm,km,lm/)
@@ -428,7 +429,16 @@
           implicit none
           integer,intent(in)::ic,jc,im,jm,lpaldus(:,:,:)
           real(8)::v1,v2
+          integer::ntmp,na
           res=.false.
+          ! Type (i)
+          na=SIZE(lpaldus(1,:,1))
+          ntmp=SUM((lpaldus(:,:na-jm+1,ic)-lpaldus(:,:na-jm+1,jc))**2)
+          if (ntmp>0) then
+            return
+          end if
+          ! Type (ii)
+          na=SIZE(lpaldus(1,:,1))
           call genweight_(jc,jm,lpaldus,v1)
           call genweight_(ic,jm,lpaldus,v2)
           if ((v1-v2-1d0)**2>TOL_) then

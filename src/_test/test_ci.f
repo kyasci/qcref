@@ -16,7 +16,7 @@
           integer,intent(in)::ian(:),nx,nfc,nac,mult
           real(8),intent(in)::r(:,:),cm(:,:),v0,vlg(:,:)
           logical::ok
-          integer::nb,nc,i,ne
+          integer::nc,i,ne
           integer,allocatable::lc1(:,:),lc2(:,:)
           real(8)::en
           real(8),allocatable::
@@ -27,7 +27,6 @@
             call basis_set('STO3G',ian(i),i)
           end do
           ! Evalate AO integrals.
-          call basis_dim(nb)
           call basis_enuc(r,ian,en)
           call basis_hij(r,ian,hb)
           call basis_ijkl(r,tb)
@@ -692,7 +691,7 @@
 
         subroutine test_main()
           implicit none
-          write(*,'("--- UGA ---")')
+          write(*,'("--- CI ---")')
           call test_ci_H2_()
           call test_ci_H3_()
           call test_ci_lih_()

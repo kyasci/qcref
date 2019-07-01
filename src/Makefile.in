@@ -1,4 +1,5 @@
 OBJ = eval.o basis.o mtrx.o rhf.o ci.o uhf.o rohf.o uga.o
+TEST_TARGET = eval.f basis.f rhf.f uhf.f rohf.f uga.f ci.f
 TARGET = libugaci.a
 .SUFFIXES =  .f .o
 
@@ -11,8 +12,8 @@ $(TARGET): $(OBJ)
 	ar rc $(TARGET) $(OBJ)
 
 test:
-	@for i in eval.f basis.f rhf.f uhf.f rohf.f uga.f ci.f ; do \
-	    python3 _unittest.py $${i} ; \
+	@for i in $(TEST_TARGET) ; do \
+	    python3 _utest.py $${i} ; \
 	done \
 
 clean:
