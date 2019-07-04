@@ -44,10 +44,12 @@ def main():
 def getargs():
     """ """
     fcflags=" ".join([
-        # "-O2", "-Wall", "-lblas", "-llapack",
-        # "-fopenmp", "-g", "-fbounds-check",
+        "-O2",
         "-lblas", "-llapack",
         "-g", "-fbounds-check",
+        "-fopenmp",
+        "-fdefault-integer-8",
+        "-Wall", 
         ])
     parser = argparse.ArgumentParser(
         prog="_unittest",

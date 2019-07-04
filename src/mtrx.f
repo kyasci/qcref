@@ -143,7 +143,7 @@
           implicit none
           real(8),intent(in)::cma(:,:),cmb(:,:)
           real(8),intent(inout)::ab(:,:)
-          integer::n,n2,i,j,k,l,ij,kl,ijkl,im,jm,km,lm,ijm,klm
+          integer::n,n2,i,j,k,l,ij,kl,im,jm,km,lm,ijm,klm
           real(8),allocatable::wk1(:,:,:,:),wk2(:,:,:,:)
           ! Get memory.
           n=SIZE(cma(:,1))
@@ -152,7 +152,7 @@
           allocate(wk2(n,n,n,n))
           wk1(:,:,:,:)=0d0
           ! Transf.: a(i,j,k,l) -> a(i,j,k,lm)
-!$omp     parallel private(i,j,k,l,lm,ijkl)
+!$omp     parallel private(i,j,k,l,lm)
 !$omp     do reduction(+:wk1)
           do i=1,n
             do j=1,n
