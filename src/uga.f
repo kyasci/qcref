@@ -13,7 +13,6 @@
         integer,allocatable::l1_(:,:),mcr_(:),mrc_(:)
         real(8),allocatable::v1_(:)
         ! Used for profiling.
-!$      real(8)::tw0_,tw1_
         !---------------------------------------------------------------
         public::
      &    uga_init,
@@ -33,7 +32,6 @@
           integer,intent(in)::ne,nfc,nac,mult,nx
           integer::nea
           integer,allocatable::lplds(:,:,:)
-!$        call timit_('init',1)
           ! Clean up the data for the previous calculation.
           if (init_) then
             call uga_del()
@@ -439,32 +437,6 @@
           end do
         end subroutine
 
-!       subroutine cc2eijekl_(n2,lbf,vbf)
-!         ! Evaluate (delta_kj E_il) part of the 2e coupling constant.
-!         implicit none
-!         integer,intent(inout)::n2,lbf(:,:)
-!         real(8),intent(inout)::vbf(:)
-!         integer::it,jt,ic,jc,kc,lc,im,jm,km,lm,nc
-!         real(8)::a1,a2
-!         integer,allocatable::nlb(:),llb(:,:,:)
-!         real(8),allocatable::vlb(:,:)
-!         integer::n2old
-!         ! Evaluate 2e constants using nonzero values of 1e constants.
-!         n2old=n2
-!         do it=1,n1_
-!           call loadcc1_(it,ic,jc,im,jm,a1)
-!           do jt=1,n1_
-!             call loadcc1_(jt,kc,lc,km,lm,a2)
-!             call addifnz2_(ic,jc,kc,lc,im,jm,km,lm,a1,a2,n2,lbf,vbf)
-!             if (n2old<n2) then
-!               ! write(*,"(2i3,x,4i4)") it,jt,ic,jc,kc,lc
-!             end if
-!             n2old=n2
-!           end do
-!         end do
-!         write(*,*) n2,n1_*n1_
-!       end subroutine
-
         subroutine addifnz2_(ic,jc,kc,lc,im,jm,km,lm,a1,a2,nbf,lbf,vbf)
           ! Evaluate 2e coupling constant and
           implicit none
@@ -714,19 +686,5 @@
           jj=min(i,j)
           ij=(ii-1)*ii/2+jj
         end function
-
-!$      subroutine timit_(mes,init)
-!$        ! Time logger for profiling.
-!$        implicit none
-!$        character(*),intent(in)::mes
-!$        integer,intent(in)::init
-!$        if (init/=0) then
-!$          tw0_=omp_get_wtime()
-!$        else
-!$          tw1_=omp_get_wtime()
-!$          write(*,"(a10,f10.4,' s')") mes,tw1_-tw0_
-!$          tw0_=tw1_
-!$        end if
-!$      end subroutine
 
       end module
