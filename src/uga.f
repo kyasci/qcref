@@ -120,11 +120,14 @@
           integer::ic,nt,im,nc,nr
           integer,allocatable::mwork(:)
           real(8)::vt
+          ! Get memoery.
           nc=SIZE(lplds(1,1,:))
           allocate(mwork(nc))
           allocate(mcr_(nc))
+          ! Set -1 to show there is no corresponding index.
           mcr_(:)=-1
           nr=0
+          ! Evaluation.
           do ic=1,nc
             nt=0
             do im=1,(nea+(mult-1))/2
@@ -181,13 +184,16 @@
           real(8)::a1
           nc=SIZE(lplds(1,1,:))
           do im=1,nac-1
-            do ic=1,nc-1
-              do jc=ic+1,nc
-                call genbasicr_(ic,jc,im,lplds,a1)
-                if (ABS(a1)>TOL_CC_) then
-                  call addnz1_(jc,ic,nfc+im+1,nfc+im,a1,nbf,lbf,vbf)
-                end if
-              end do
+            do jc=1,nc
+              ! Type A
+              call genbasica_(jc,im,lplds,ic,a1)
+              if (ABS(a1)>TOL_CC_) then
+                call addnz1_(jc,ic,nfc+im+1,nfc+im,a1,nbf,lbf,vbf)
+              end if
+              call genbasicb_(jc,im,lplds,ic,a1)
+              if (ABS(a1)>TOL_CC_) then
+                call addnz1_(jc,ic,nfc+im+1,nfc+im,a1,nbf,lbf,vbf)
+              end if
             end do
           end do
         end subroutine
@@ -202,7 +208,9 @@
           real(8),intent(out),allocatable::vbr(:)
           integer::it,ic,jc,im,jm
           real(8)::a1
-          allocate(lbr(3,lbfnz_),ibr(nac),vbr(lbfnz_))
+          allocate(lbr(3,lbfnz_))
+          allocate(ibr(nac))
+          allocate(vbr(lbfnz_))
           nbr=0
           ibr(:)=0
           do it=1,nbf
@@ -222,16 +230,69 @@
           end do
         end subroutine
 
+        subroutine cpbrnz_(im,nbr,lbr,vbr,gr)
+          ! copy the nonzero values of basic generator matrix elements.
+          implicit none
+          integer,intent(in)::im,nbr,lbr(:,:)
+          real(8),intent(in)::vbr(:)
+          real(8),intent(out)::gr(:)
+          integer::it,ijc
+          gr(:)=0d0
+          do it=1,nbr
+            if (lbr(1,it)==im) then
+              ijc=ip_(lbr(2,it),lbr(3,it))
+              gr(ijc)=vbr(it)
+            end if
+            if (lbr(1,it)>im) then
+              exit
+            end if
+          end do
+        end subroutine
+
+        subroutine evalgr_(jm,gr,nbr,ibr,lbr,vbr)
+          ! Evaluate raising generator matrix elements for the given jm.
+          implicit none
+          integer,intent(in)::jm,nbr,ibr(:),lbr(:,:)
+          real(8),intent(in)::vbr(:)
+          real(8),intent(inout)::gr(:)
+          real(8),allocatable::gt(:)
+          integer::ic,jc,kc,ijc,nc,it,ngr,nc2
+          nc2=SIZE(gr)
+          call iup_(nc2,nc,ic)
+          allocate(gt(SIZE(gr)))
+          gt(:)=0d0
+          ngr=0
+          do it=ibr(jm),nbr
+            if (lbr(1,it)>jm) then
+              exit
+            end if
+            ! Frist term.
+            kc=lbr(2,it)
+            jc=lbr(3,it)
+            do ic=1,jc-1
+              ijc=ip_(ic,jc)
+              gt(ijc)=gt(ijc)+gr(ip_(ic,kc))*vbr(it)
+            end do
+            ! Second term.
+            ic=lbr(2,it)
+            kc=lbr(3,it)
+            do jc=ic+1,nc
+              ijc=ip_(ic,jc)
+              gt(ijc)=gt(ijc)-vbr(it)*gr(ip_(kc,jc))
+            end do
+          end do
+          gr(:)=gt(:)
+        end subroutine
+
         subroutine add1raising_(nfc,nac,lplds,nbf,lbf,vbf)
           ! Reising generator contributions to 1e constants (CAS).
           integer,intent(in)::nfc,nac,lplds(:,:,:)
           integer,intent(inout)::nbf,lbf(:,:)
           real(8),intent(inout)::vbf(:)
           integer::im,jm,ic,jc,kc,nc,nc2,it,ijc,ip,np
-          real(8)::a1
           integer::nbr
           integer,allocatable::lbr(:,:),ibr(:),nlbf(:),llbf(:,:,:)
-          real(8),allocatable::vbr(:),gr(:),gt(:),vlbf(:,:)
+          real(8),allocatable::vbr(:),gr(:),vlbf(:,:)
           ! Get memory.
           nc=SIZE(lplds(1,1,:))
           nc2=ip_(nc,nc)
@@ -239,73 +300,39 @@
 !$omp     parallel shared(np)
 !$        np=omp_get_num_threads()
 !$omp     end parallel
-          allocate(nlbf(np),llbf(4,lbfnz_,np),vlbf(lbfnz_,np))
+          allocate(nlbf(np))
+          allocate(llbf(4,lbfnz_,np))
+          allocate(vlbf(lbfnz_,np))
           nlbf(:)=0
           ! Load and mount the basic generator.
           call mountbt_(nac,nfc,nbf,lbf,vbf,nbr,lbr,ibr,vbr)
           ! Evaluate raising generators.
-!$omp     parallel private(ip,im,it,ijc,jm,ic,jc,a1,kc,gt,gr)
-          allocate(gr(nc2),gt(nc2))
-!$omp     do
+!$omp     parallel private(ip,im,jm,it,ic,jc,ijc,kc,gr)
+          allocate(gr(nc2))
+!$omp     do schedule(dynamic)
           do im=1,nac-1
             ip=1
 !$          ip=omp_get_thread_num()+1
-            gt(:)=0d0
-            gr(:)=0d0
-            do it=1,nbr
-              if (lbr(1,it)==im) then
-                ijc=ip_(lbr(2,it),lbr(3,it))
-                gr(ijc)=vbr(it)
-              end if
-              if (lbr(1,it)>im) then
-                exit
-              end if
-            end do
+            ! Set the initial value.
+            call cpbrnz_(im,nbr,lbr,vbr,gr)
+            ! Evaluate the 1e constants and dump them on the memory.
             do jm=im+1,nac-1
-              do ic=1,nc-1
-                do jc=ic+1,nc
-                  if (.not.is_possible_(ic,jc,im,jm+1,lplds)) then
-                    cycle
-                  end if
-                  ijc=ip_(ic,jc)
-                  a1=0d0
-                  if (ibr(jm)>0) then
-                    do it=ibr(jm),nbr
-                      if (lbr(1,it)==jm) then
-                        if (lbr(3,it)==jc) then
-                          kc=lbr(2,it)
-                          a1=a1+gr(ip_(ic,kc))*vbr(it)
-                        end if
-                        if (lbr(2,it)==ic) then
-                          kc=lbr(3,it)
-                          a1=a1-vbr(it)*gr(ip_(kc,jc))
-                        end if
-                      else if (lbr(1,it)>jm) then
-                        exit
-                      end if
-                    end do
-                  end if
-                  if (ABS(a1)>TOL_CC_) then
-                    gt(ijc)=a1
-                    call addnz1_(
-     &                jc,ic,nfc+jm+1,nfc+im,a1,
-     &                nlbf(ip),llbf(:,:,ip),vlbf(:,ip))
-                  end if
-                end do
+              call evalgr_(jm,gr,nbr,ibr,lbr,vbr)
+              ! Damp
+              do ijc=1,nc2
+                if (ABS(gr(ijc))>TOL_CC_) then
+                call iup_(ijc,jc,ic)
+                  call addnz1_(
+     &              jc,ic,nfc+jm+1,nfc+im,gr(ijc),
+     &              nlbf(ip),llbf(:,:,ip),vlbf(:,ip))
+                end if
               end do
-              gr(:)=gt(:)
             end do
           end do
 !$omp     end do
 !$omp     end parallel
           ! Collect the results.
-          do ip=1,np
-            do it=1,nlbf(ip)
-              nbf=nbf+1
-              lbf(:,nbf)=llbf(:,it,ip)
-              vbf(nbf)=vlbf(it,ip)
-            end do
-          end do
+          call clctnz_(nlbf,llbf,vlbf,nbf,lbf,vbf)
         end subroutine
 
         subroutine mknz1_(nfc,nac,lplds)
@@ -317,7 +344,8 @@
           real(8),allocatable::vbf(:)
           ! Get memory.
           nbf=0
-          allocate(lbf(4,lbfnz_),vbf(lbfnz_))
+          allocate(lbf(4,lbfnz_))
+          allocate(vbf(lbfnz_))
           ! Weight generators.
           call add1weight_(nfc,nac,lplds,nbf,lbf,vbf)
           ! Basic raising generators.
@@ -326,7 +354,8 @@
           call add1raising_(nfc,nac,lplds,nbf,lbf,vbf)
           ! Set the module variables.
           n1_=nbf
-          allocate(l1_(4,n1_),v1_(n1_))
+          allocate(l1_(4,n1_))
+          allocate(v1_(n1_))
           l1_(:,:n1_)=lbf(:,:n1_)
           v1_(:n1_)=vbf(:n1_)
         end subroutine
@@ -340,7 +369,8 @@
           integer,allocatable::lbf(:,:)
           real(8),allocatable::vbf(:)
           ! Get memory for the working space.
-          allocate(lbf(4,lbfnz_),vbf(lbfnz_))
+          allocate(lbf(4,lbfnz_))
+          allocate(vbf(lbfnz_))
           ! Pick up nonzero values for RAS from CAS.
           nnz1=0
           do inz=1,n1_
@@ -369,14 +399,16 @@
           integer,allocatable::lbf(:,:)
           real(8),allocatable::vbf(:)
           ! Get memory for the working space.
-          allocate(lbf(6,lbfnz_),vbf(lbfnz_))
+          allocate(lbf(6,lbfnz_))
+          allocate(vbf(lbfnz_))
           ! Evaluate (E_ij E_kl) part with resolution of identity.
           n2=0
           call cc2eijekl_(n2,lbf,vbf)
           ! Evaluate (delta_kj E_il) part.
           call cc2dkjeil_(n2,lbf,vbf)
           ! Get memory and set the values evaluated above.
-          allocate(lc2(6,n2),vc2(n2))
+          allocate(lc2(6,n2))
+          allocate(vc2(n2))
           lc2(:,:n2)=lbf(:,:n2)
           vc2(:n2)=vbf(:n2)
         end subroutine
@@ -394,56 +426,94 @@
           a1=v1_(it)
         end subroutine
 
+        subroutine getlcmp(ncmp,lcmp)
+          ! Get the list of index to be scanned.
+          integer,parameter::MXLCMP=1000
+          integer,intent(out),allocatable::ncmp(:),lcmp(:,:)
+          integer::nc,it,ic,jc
+          nc=MAXVAL(l1_(1,:))
+          allocate(ncmp(nc))
+          allocate(lcmp(MXLCMP,nc))
+          ncmp(:)=0
+          do it=1,n1_
+            ic=l1_(1,it)
+            ncmp(ic)=ncmp(ic)+1
+            lcmp(ncmp(ic),ic)=it
+            jc=l1_(2,it)
+            if (ic /= jc) then
+              ncmp(jc)=ncmp(jc)+1
+              lcmp(ncmp(jc),jc)=it
+            end if
+          end do
+        end subroutine
+
         subroutine cc2eijekl_(n2,lbf,vbf)
           ! Evaluate (delta_kj E_il) part of the 2e coupling constant.
           implicit none
           integer,intent(inout)::n2,lbf(:,:)
           real(8),intent(inout)::vbf(:)
-          integer::it,jt,ic,jc,kc,lc,im,jm,km,lm
-          real(8)::a1,a2
-          integer::ip,np
-          integer,allocatable::nlb(:),llb(:,:,:)
+          integer::it,jt,iw,jw,ic,jc,im,jm
+          real(8)::a1
+          integer::ip,np,ipt
+          integer,allocatable::nlb(:),llb(:,:,:),lcmp(:,:),ncmp(:)
           real(8),allocatable::vlb(:,:)
+          logical::go
           ! Get memory.
 !$omp     parallel shared(np)
           np=1
 !$        np=omp_get_num_threads()
 !$omp     end parallel
-          allocate(nlb(np),llb(6,lbfnz_,np),vlb(lbfnz_,np))
+          allocate(nlb(np))
+          allocate(llb(6,lbfnz_,np))
+          allocate(vlb(lbfnz_,np))
+          ! Get the list of index to be scanned.
+          call getlcmp(ncmp,lcmp)
           ! Evaluate 2e constants using nonzero values of 1e constants.
           nlb(:)=0
-!$omp     parallel private(ip,it,jt,ic,jc,kc,lc,im,jm,km,lm,a1,a2)
-!$omp     do schedule(guided)
+!$omp     parallel private(it,ip,ic,jc,im,jm,a1,iw,jt,ipt,jw,go)
+!$omp     do schedule(dynamic)
           do it=1,n1_
             ip=1
 !$          ip=omp_get_thread_num()+1
             call loadcc1_(it,ic,jc,im,jm,a1)
-            do jt=1,n1_
-              call loadcc1_(jt,kc,lc,km,lm,a2)
-              call addifnz2_(
-     &          ic,jc,kc,lc,im,jm,km,lm,a1,a2,
-     &          nlb(ip),llb(:,:,ip),vlb(:,ip))
+            do iw=1,ncmp(ic)
+              jt=lcmp(iw,ic)
+              call addifnz2_(it,jt,nlb(ip),llb(:,:,ip),vlb(:,ip))
+            end do
+            ipt=1
+            do jw=1,ncmp(jc)
+              jt=lcmp(jw,jc)
+              go=.true.
+              do iw=ipt,ncmp(ic)
+                if (jt==lcmp(iw,ic)) then
+                  go=.false.
+                  ipt=iw
+                  exit
+                end if
+              end do
+              if (go) then
+                call addifnz2_(it,jt,nlb(ip),llb(:,:,ip),vlb(:,ip))
+              end if
             end do
           end do
 !$omp     end do
 !$omp     end parallel
           ! Collect the results.
-          do ip=1,np
-            do it=1,nlb(ip)
-              n2=n2+1
-              lbf(:,n2)=llb(:,it,ip)
-              vbf(n2)=vlb(it,ip)
-            end do
-          end do
+          call clctnz_(nlb,llb,vlb,n2,lbf,vbf)
         end subroutine
 
-        subroutine addifnz2_(ic,jc,kc,lc,im,jm,km,lm,a1,a2,nbf,lbf,vbf)
-          ! Evaluate 2e coupling constant and
+        subroutine addifnz2_(it,jt,nbf,lbf,vbf)
+          ! Evaluate 2e constants and add the nonzero values.
           implicit none
-          integer,intent(in)::ic,jc,kc,lc,im,jm,km,lm
-          real(8),intent(in)::a1,a2
+          integer,intent(in)::it,jt
           integer,intent(inout)::nbf,lbf(:,:)
           real(8),intent(inout)::vbf(:)
+          integer::ic,jc,kc,lc,im,jm,km,lm
+          real(8)::a1,a2
+          ! Load the 1e constants.
+          call loadcc1_(it,ic,jc,im,jm,a1)
+          call loadcc1_(jt,kc,lc,km,lm,a2)
+          ! Evaluate 2e constants and add the nonzero values.
           if (ic/=kc.and.ic/=lc.and.jc/=kc.and.jc/=lc) then
             return
           end if
@@ -463,6 +533,41 @@
               call addnz2r_(ic,kc,im,jm,lm,km,a1,a2,nbf,lbf,vbf)
             end if
           end if
+        end subroutine
+
+        subroutine addnz2r_(ic,jc,im,jm,km,lm,a1,a2,n,l,v)
+          ! Add the non-zero values of the 2e constants (RAS).
+          implicit none
+          integer,intent(in)::ic,jc,im,jm,km,lm
+          real(8),intent(in)::a1,a2
+          integer,intent(inout)::n,l(:,:)
+          real(8),intent(inout)::v(:)
+          integer::ir,jr
+          ir=mcr_(ic)
+          jr=mcr_(jc)
+          if (ir>0.and.jr>0) then
+            n=n+1
+            l(:,n)=(/ir,jr,im,jm,km,lm/)
+            v(n)=a1*a2/2d0
+          end if
+        end subroutine
+
+        subroutine clctnz_(nlb,llb,vlb,nbf,lbf,vbf)
+          ! Collect the nonzero values.
+          implicit none
+          integer,intent(in)::nlb(:),llb(:,:,:)
+          real(8),intent(in)::vlb(:,:)
+          integer,intent(inout)::nbf,lbf(:,:)
+          real(8),intent(inout)::vbf(:)
+          integer::ip,np,it
+          np=SIZE(nlb)
+          do ip=1,np
+            do it=1,nlb(ip)
+              nbf=nbf+1
+              lbf(:,nbf)=llb(:,it,ip)
+              vbf(nbf)=vlb(it,ip)
+            end do
+          end do
         end subroutine
 
         subroutine cc2dkjeil_(n2,lbf,vbf)
@@ -486,101 +591,109 @@
           end do
         end subroutine
 
-        subroutine addnz2r_(ic,jc,im,jm,km,lm,a1,a2,n,l,v)
-          ! Add the non-zero values of the 2e constants (RAS).
-          implicit none
-          integer,intent(in)::ic,jc,im,jm,km,lm
-          real(8),intent(in)::a1,a2
-          integer,intent(inout)::n,l(:,:)
-          real(8),intent(inout)::v(:)
-          integer::ir,jr
-          ir=mcr_(ic)
-          jr=mcr_(jc)
-          if (ir>0.and.jr>0) then
-            n=n+1
-            l(:,n)=(/ir,jr,im,jm,km,lm/)
-            v(n)=a1*a2/2d0
-          end if
-        end subroutine
+!       logical function is_possible_(ic,jc,im,jm,lplds) result(res)
+!         ! Apply the selection rules of 1e constants.
+!         implicit none
+!         integer,intent(in)::ic,jc,im,jm,lplds(:,:,:)
+!         real(8)::v1,v2
+!         integer::ntmp,na,i
+!         res=.false.
+!         ! Type (i)
+!         na=SIZE(lplds(1,:,1))
+!         do i=1,na-jm+1
+!           ntmp=SUM((lplds(:,i,ic)-lplds(:,i,jc))**2)
+!           if (ntmp>0) then
+!             return
+!           end if
+!         end do
+!         ! Type (ii)
+!         na=SIZE(lplds(1,:,1))
+!         call genweight_(jc,jm,lplds,v1)
+!         call genweight_(ic,jm,lplds,v2)
+!         if ((v1-v2-1d0)**2>TOL_) then
+!           return
+!         end if
+!         call genweight_(jc,im,lplds,v1)
+!         call genweight_(ic,im,lplds,v2)
+!         if ((v1-v2+1d0)**2>TOL_) then
+!           return
+!         end if
+!         res=.true.
+!       end function
 
-        logical function is_possible_(ic,jc,im,jm,lplds) result(res)
-          ! Apply the selection rules of 1e constants.
-          implicit none
-          integer,intent(in)::ic,jc,im,jm,lplds(:,:,:)
-          real(8)::v1,v2
-          integer::ntmp,na,i
-          res=.false.
-          ! Type (i)
-          na=SIZE(lplds(1,:,1))
-          do i=1,na-jm+1
-            ntmp=SUM((lplds(:,i,ic)-lplds(:,i,jc))**2)
-            if (ntmp>0) then
-              return
-            end if
-          end do
-          ! Type (ii)
-          na=SIZE(lplds(1,:,1))
-          call genweight_(jc,jm,lplds,v1)
-          call genweight_(ic,jm,lplds,v2)
-          if ((v1-v2-1d0)**2>TOL_) then
-            return
-          end if
-          call genweight_(jc,im,lplds,v1)
-          call genweight_(ic,im,lplds,v2)
-          if ((v1-v2+1d0)**2>TOL_) then
-            return
-          end if
-          res=.true.
-        end function
-
-        subroutine genbasicr_(ic,jc,im,lplds,val)
-          ! Basic raising generator for the case (im+1=jm).
-          integer,intent(in)::ic,jc,im,lplds(:,:,:)
+        subroutine genbasica_(jc,im,lplds,ic,val)
+          ! Basic raising generator for the case (im+1=jm) (Type A).
+          integer,intent(in)::jc,im,lplds(:,:,:)
+          integer,intent(out)::ic
           real(8),intent(out)::val
-          integer::nac
+          integer::nac,it
           integer,allocatable::diff(:,:)
-          real(8)::ai,bi,ci,aip,bip,cip,aim,bim,cim
-          if (ic>=jc) then
-            write(*,'("error: ic>=jc: genbasicr_()")')
-            write(*,'(2i5)')ic,jc
-            stop 1
-          end if
-          val=0d0
-          if (.not.is_possible_(ic,jc,im,im+1,lplds)) then
-            return
-          end if
+          real(8)::ai,bi,aip,bip,aim,bim
           nac=SIZE(lplds(1,:,1))
           allocate(diff(3,nac))
           ! Start evaluation.
           ai=lplds(1,nac+1-im,jc)
           bi=lplds(2,nac+1-im,jc)
-          ci=lplds(3,nac+1-im,jc)
           aip=lplds(1,nac+1-(im+1),jc)
           bip=lplds(2,nac+1-(im+1),jc)
-          cip=lplds(3,nac+1-(im+1),jc)
           aim=0d0
           bim=0d0
-          cim=0d0
           if (im>1) then
             aim=lplds(1,nac+1-(im-1),jc)
             bim=lplds(2,nac+1-(im-1),jc)
-            cim=lplds(3,nac+1-(im-1),jc)
           end if
+          ic=0
+          val=0d0
           if (ai==aim.and.aim==aip-1.and.ABS(bi)>TOL_) then
             diff(:,:)=lplds(:,:,jc)
             diff(:,nac+1-im)=diff(:,nac+1-im)+(/1,-1,0/)
-            diff(:,:)=diff(:,:)-lplds(:,:,ic)
-            if (SUM(diff**2)<TOL_) then
-              val=((bi*(bi+1d0))/((bip+1d0)*(bim+1d0)))**0.5d0
-            end if
+            val=((bi*(bi+1d0))/((bip+1d0)*(bim+1d0)))**0.5d0
           end if
+          if (ABS(val)>TOL_) then
+            do it=jc,1,-1
+              if (SUM((diff(:,:)-lplds(:,:,it))**2)<TOL_) then
+                ic=it
+                exit
+              end if
+            end do
+          end if
+        end subroutine
+
+        subroutine genbasicb_(jc,im,lplds,ic,val)
+          ! Basic raising generator for the case (im+1=jm) (Type B).
+          integer,intent(in)::jc,im,lplds(:,:,:)
+          integer,intent(out)::ic
+          real(8),intent(out)::val
+          integer::nac,it
+          integer,allocatable::diff(:,:)
+          real(8)::bi,ci,bip,cip,bim,cim
+          nac=SIZE(lplds(1,:,1))
+          allocate(diff(3,nac))
+          ! Start evaluation.
+          bi=lplds(2,nac+1-im,jc)
+          ci=lplds(3,nac+1-im,jc)
+          bip=lplds(2,nac+1-(im+1),jc)
+          cip=lplds(3,nac+1-(im+1),jc)
+          bim=0d0
+          cim=0d0
+          if (im>1) then
+            bim=lplds(2,nac+1-(im-1),jc)
+            cim=lplds(3,nac+1-(im-1),jc)
+          end if
+          ic=0
+          val=0d0
           if (ci==cip.and.cip==cim+1.and.ABS(ci)>TOL_) then
             diff(:,:)=lplds(:,:,jc)
             diff(:,nac+1-im)=diff(:,nac+1-im)+(/0,1,-1/)
-            diff(:,:)=diff(:,:)-lplds(:,:,ic)
-            if (SUM(diff**2)<TOL_) then
-              val=(((bi+1d0)*(bi+2d0))/((bip+1d0)*(bim+1d0)))**0.5d0
-            end if
+            val=(((bi+1d0)*(bi+2d0))/((bip+1d0)*(bim+1d0)))**0.5d0
+          end if
+          if (ABS(val)>TOL_) then
+            do it=jc,1,-1
+              if (SUM((diff(:,:)-lplds(:,:,it))**2)<TOL_) then
+                ic=it
+                exit
+              end if
+            end do
           end if
         end subroutine
 
@@ -686,5 +799,16 @@
           jj=min(i,j)
           ij=(ii-1)*ii/2+jj
         end function
+
+        subroutine iup_(ij,i,j)
+          ! Unpack the canonical index for a symmetric matrix (1e).
+          implicit none
+          integer,intent(in)::ij
+          integer,intent(out)::i,j
+          real(8)::vt
+          vt=0.5d0*(-1d0+SQRT(1d0+8*ij))
+          i=CEILING(vt)
+          j=ij-(i-1)*i/2
+        end subroutine
 
       end module

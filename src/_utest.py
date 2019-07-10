@@ -49,7 +49,7 @@ def getargs():
         "-g", "-fbounds-check",
         "-fopenmp",
         "-fdefault-integer-8",
-        "-Wall", 
+        # "-Wall", 
         ])
     parser = argparse.ArgumentParser(
         prog="_unittest",
