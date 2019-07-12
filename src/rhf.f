@@ -60,13 +60,10 @@
           real(8),intent(out)::val
           integer::i,j,ndoc
           real(8),allocatable::hm(:),tm(:)
-          ndoc=ne/2
-          allocate(hm(SIZE(hb)),tm(SIZE(tb)))
           ! Transform integrals into the MO basis.
-          hm(:)=hb(:)
-          tm(:)=tb(:)
-          call mtrx_utau(cm,hm)
-          call mtrx_utau2(cm,tm)
+          ndoc=ne/2
+          call mtrx_utaup(cm(:,:ndoc),hb,hm)
+          call mtrx_utau2p(cm(:,:ndoc),tb,tm)
           val=0d0
           ! 1e integral contributions.
           do i=1,ndoc

@@ -1,4 +1,6 @@
       module mtrx
+        ! Matrix operation utilities.
+!$      use omp_lib
         implicit none
         private
         real(8),parameter::TOL_=1d-10
@@ -7,7 +9,9 @@
      &      mtrx_xcanon,
      &      mtrx_uc,
      &      mtrx_utau,
+     &      mtrx_utaup,
      &      mtrx_utau2,
+     &      mtrx_utau2p,
      &      mtrx_utau2u,
      &      mtrx_eigsp,
      &      mtrx_expv,
@@ -35,45 +39,73 @@
         end subroutine
 
         subroutine mtrx_utau(u,a)
+          ! Unitary transformation of a 1e matrix (distructive).
+          implicit none
+          real(8),intent(in)::u(:,:)
+          real(8),intent(inout)::a(:)
+          real(8),allocatable::b(:)
+          call mtrx_utaup(u,a,b)
+          a(:)=b(:)
+        end subroutine
+
+        subroutine mtrx_utaup(u,a,b)
           ! Unitary transformation of a 1e matrix (2-index).
           implicit none
           real(8),intent(in)::u(:,:)
-          real(8),intent(out)::a(:)
-          integer::i,j,k,ij,n
+          real(8),intent(in)::a(:)
+          real(8),intent(out),allocatable::b(:)
+          integer::i,j,k,ij,n,m,m2
           real(8),allocatable::vt(:,:)
           n=SIZE(u(:,1))
-          allocate(vt(n,n))
+          m=SIZE(u(1,:))
+          m2=ip_(m,m)
+          allocate(vt(n,m))
+          allocate(b(m2))
           vt(:,:)=0d0
           do i=1,n
-            do j=1,n
+            do j=1,m
               do k=1,n
                 vt(i,j)=vt(i,j)+a(ip_(i,k))*u(k,j)
               end do
             end do
           end do
-          a(:)=0d0
-          do i=1,n
+          b(:)=0d0
+          do i=1,m
             do j=1,i
               ij=ip_(i,j)
               do k=1,n
-                a(ij)=a(ij)+u(k,i)*vt(k,j)
+                b(ij)=b(ij)+u(k,i)*vt(k,j)
               end do
             end do
           end do
         end subroutine
 
-        subroutine mtrx_utau2(cm,ab)
+        subroutine mtrx_utau2(u,a)
+          ! Unitary transformation of a 2e matrix (distructive).
+          implicit none
+          real(8),intent(in)::u(:,:)
+          real(8),intent(inout)::a(:)
+          real(8),allocatable::b(:)
+          call mtrx_utau2p(u,a,b)
+          a(:)=b(:)
+        end subroutine
+
+        subroutine mtrx_utau2p(u,a,b)
           ! Unitary transformation of a 2e matrix (4-index).
           implicit none
-          real(8),intent(in)::cm(:,:)
-          real(8),intent(inout)::ab(:)
-          integer::n,n3,i,j,k,l,ijkl,im,jm,km,lm,ijklm
+          real(8),intent(in)::u(:,:)
+          real(8),intent(in)::a(:)
+          real(8),intent(out),allocatable::b(:)
+          integer::n,n3,m,m3,i,j,k,l,ijkl,im,jm,km,lm,ijklm
           real(8),allocatable::wk1(:,:,:,:),wk2(:,:,:,:)
           ! Get memory.
-          n=SIZE(cm(:,1))
-          n3=SIZE(ab)
+          n=SIZE(u(:,1))
+          m=SIZE(u(1,:))
+          n3=SIZE(a)
+          m3=ip2_(m,m,m,m)
           allocate(wk1(n,n,n,n))
           allocate(wk2(n,n,n,n))
+          allocate(b(m3))
           wk1(:,:,:,:)=0d0
           ! Transf.: a(i,j,k,l) -> a(i,j,k,lm)
 !$omp     parallel private(i,j,k,l,lm,ijkl)
@@ -81,10 +113,10 @@
           do i=1,n
             do j=1,n
               do k=1,n
-                do lm=1,n
+                do lm=1,m
                   do l=1,n
                     ijkl=ip2_(i,j,k,l)
-                    wk1(i,j,k,lm)=wk1(i,j,k,lm)+cm(l,lm)*ab(ijkl)
+                    wk1(i,j,k,lm)=wk1(i,j,k,lm)+u(l,lm)*a(ijkl)
                   end do
                 end do
               end do
@@ -98,10 +130,10 @@
 !$omp     do reduction(+:wk2)
           do i=1,n
             do j=1,n
-              do km=1,n
-                do lm=1,n
+              do km=1,m
+                do lm=1,m
                   do k=1,n
-                    wk2(i,j,km,lm)=wk2(i,j,km,lm)+cm(k,km)*wk1(i,j,k,lm)
+                    wk2(i,j,km,lm)=wk2(i,j,km,lm)+u(k,km)*wk1(i,j,k,lm)
                   end do
                 end do
               end do
@@ -115,12 +147,12 @@
 !$omp     parallel private(i,jm,km,lm,j)
 !$omp     do reduction(+:wk2)
           do i=1,n
-            do jm=1,n
-              do km=1,n
-                do lm=1,n
+            do jm=1,m
+              do km=1,m
+                do lm=1,m
                   do j=1,n
                     wk2(i,jm,km,lm)=wk2(i,jm,km,lm)
-     &                +cm(j,jm)*wk1(i,j,km,lm)
+     &                +u(j,jm)*wk1(i,j,km,lm)
                   end do
                 end do
               end do
@@ -129,11 +161,11 @@
 !$omp     end do
 !$omp     end parallel
           ! Transf.:(i,jm,km,lm) -> (im,jm,km,lm)
-          ab(:)=0d0
-          do ijklm=1,n3
+          b(:)=0d0
+          do ijklm=1,m3
             call iup2_(ijklm,im,jm,km,lm)
             do i=1,n
-              ab(ijklm)=ab(ijklm)+cm(i,im)*wk2(i,jm,km,lm)
+              b(ijklm)=b(ijklm)+u(i,im)*wk2(i,jm,km,lm)
             end do
           end do
         end subroutine
@@ -209,12 +241,6 @@
 !$omp     end parallel
           ! Transf.:(i,jm,km,lm) -> (im,jm,km,lm)
           ab(:,:)=0d0
-!         do ijklm=1,n3
-!           call iup2_(ijklm,im,jm,km,lm)
-!           do i=1,n
-!             ab(ijklm)=ab(ijklm)+cm(i,im)*wk2(i,jm,km,lm)
-!           end do
-!         end do
           do ijm=1,n2
             call iup_(ijm,im,jm)
             do klm=1,n2

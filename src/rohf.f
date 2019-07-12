@@ -101,19 +101,14 @@
           integer,intent(in)::nea,neb
           real(8),intent(in)::cm(:,:),fba(:),fbb(:)
           real(8),intent(out)::val(:)
-          integer::i,j,ij,nb,nb2
+          integer::i,j,ij,nb
           real(8)::acc,bcc,aoo,boo,avv,bvv
           real(8),allocatable::fa(:),fb(:)
           call fockparam_(acc,bcc,aoo,boo,avv,bvv)
-          nb2=SIZE(fba)
-          call iup_(nb2,i,nb)
-          allocate(fa(nb2))
-          allocate(fb(nb2))
+          call iup_(SIZE(fba),i,nb)
           ! Fock matrix in the MO basis.
-          fa(:)=fba(:)
-          fb(:)=fbb(:)
-          call mtrx_utau(cm,fa)
-          call mtrx_utau(cm,fb)
+          call mtrx_utaup(cm,fba,fa)
+          call mtrx_utaup(cm,fbb,fb)
           ! Form combined Fock matrix in the MO basis.
           val(:)=0d0
           do i=1,nb
@@ -144,12 +139,10 @@
           integer,intent(in)::nea,neb
           real(8),intent(in)::cm(:,:),sb(:),fba(:),fbb(:)
           real(8),intent(out)::val(:)
-          integer::i,j,ij,nb,nb2
+          integer::i,j,ij,nb
           real(8),allocatable::fa(:),fb(:),ct(:,:)
-          nb2=SIZE(fba)
-          call iup_(nb2,i,nb)
-          allocate(fa(nb2))
-          allocate(fb(nb2))
+          ! Get memory.
+          call iup_(SIZE(fba),i,nb)
           allocate(ct(nb,nb))
           ! The inverse of MO coefficients.
           do ij=1,SIZE(sb)
@@ -159,10 +152,8 @@
           end do
           call mtrx_uc(TRANSPOSE(cm),ct)
           ! Fock matrix in the MO basis.
-          fa(:)=fba(:)
-          fb(:)=fbb(:)
-          call mtrx_utau(cm,fa)
-          call mtrx_utau(cm,fb)
+          call mtrx_utaup(cm,fba,fa)
+          call mtrx_utaup(cm,fbb,fb)
           ! Form combined Fock matrix in the MO basis.
           call fockm_(nea,neb,cm,fba,fbb,val)
           ! Transform the Fock matrix to the AO basis.

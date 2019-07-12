@@ -93,13 +93,9 @@
           real(8),intent(out)::val
           integer::i,j
           real(8),allocatable::hm(:),tm(:)
-          ! Get memory.
-          allocate(hm(SIZE(hb)),tm(SIZE(tb)))
           ! Transform integrals into the MO basis.
-          hm(:)=hb(:)
-          tm(:)=tb(:)
-          call mtrx_utau(cm,hm)
-          call mtrx_utau2(cm,tm)
+          call mtrx_utaup(cm(:,:ne),hb,hm)
+          call mtrx_utau2p(cm(:,:ne),tb,tm)
           val=0d0
           ! 1e integral contributions.
           do i=1,ne

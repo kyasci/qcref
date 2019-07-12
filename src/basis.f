@@ -1,5 +1,6 @@
       module basis
         ! Atomic basis set and integral matrices as a wrapper of "eval".
+!$      use omp_lib
         use eval
         implicit none
         private
@@ -141,16 +142,17 @@
           ! AO derivative coupling matrix (i|d/dRk|j)
           implicit none
           real(8),intent(in)::r(:,:)
-          real(8),intent(out)::val(:,:,:,:)
+          real(8),intent(out),allocatable::val(:,:,:,:)
           real(8),allocatable::vb(:,:,:)
-          integer::nb,i,j,ix,ia
+          integer::i,j,ix,ia,natm
           real(8)::vt
-          nb=SIZE(val(:,1,1,1))
-          allocate(vb(nb,nb,3))
+          natm=SIZE(r(1,:))
+          allocate(val(nb_,nb_,3,natm))
+          allocate(vb(nb_,nb_,3))
           ! AO velocity integral (i|d/dr|j)
           do ix=1,3
-            do i=1,nb
-              do j=1,nb
+            do i=1,nb_
+              do j=1,nb_
                 if (i==j) then
                   vt=0d0
                 else
@@ -163,10 +165,10 @@
             end do
           end do
           val(:,:,:,:)=0d0
-          do ia=1,SIZE(r(1,:))
+          do ia=1,natm
             do ix=1,3
-              do i=1,nb
-                do j=1,nb
+              do i=1,nb_
+                do j=1,nb_
                   if (is_(j)==ia) then
                     val(i,j,ix,ia)=(-1d0)*vb(i,j,ix)
                   end if

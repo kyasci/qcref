@@ -31,11 +31,8 @@
           call basis_hij(r,ian,hb)
           call basis_ijkl(r,tb)
           ! Transform AO integrals into the MO basis.
-          allocate(hm(SIZE(hb)),tm(SIZE(tb)))
-          hm(:)=hb(:)
-          tm(:)=tb(:)
-          call mtrx_utau(cm,hm)
-          call mtrx_utau2(cm,tm)
+          call mtrx_utaup(cm(:,:nfc+nac),hb,hm)
+          call mtrx_utau2p(cm(:,:nfc+nac),tb,tm)
           ! Generate 1e and 2e coupling constants (UGA).
           ne=SUM(ian)
           call uga_init(ne,nfc,nac,mult,nx)

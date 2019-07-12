@@ -4,7 +4,6 @@
         ! Reference:
         !   J. Paldus, J. Chem. Phys. 61, 5321 (1974).
         !
-!$      use omp_lib
         implicit none
         private
         real(8),parameter::TOL_=1d-10,TOL_CC_=1d-5
@@ -144,6 +143,59 @@
           mrc_(:nr)=mwork(:nr)
         end subroutine
 
+        subroutine uga_cc1(lc1,vc1)
+          ! 1e coupling constatns in the compressed matrix form.
+          implicit none
+          integer,intent(out),allocatable::lc1(:,:)
+          real(8),intent(out),allocatable::vc1(:)
+          integer::nnz1,ir,inz
+          integer,allocatable::lbf(:,:)
+          real(8),allocatable::vbf(:)
+          ! Get memory for the working space.
+          allocate(lbf(4,lbfnz_))
+          allocate(vbf(lbfnz_))
+          ! Pick up nonzero values for RAS from CAS.
+          nnz1=0
+          do inz=1,n1_
+            ir=mcr_(l1_(1,inz))
+            if (ir>0) then
+              nnz1=nnz1+1
+              lbf(1,nnz1)=ir
+              lbf(2,nnz1)=mcr_(l1_(2,inz))
+              lbf(3,nnz1)=l1_(3,inz)
+              lbf(4,nnz1)=l1_(4,inz)
+              vbf(nnz1)=v1_(inz)
+            end if
+          end do
+          ! Get memory and set the picked values.
+          allocate(lc1(4,nnz1),vc1(nnz1))
+          lc1(:,:nnz1)=lbf(:,:nnz1)
+          vc1(:nnz1)=vbf(:nnz1)
+        end subroutine
+
+        subroutine uga_cc2(lc2,vc2)
+          ! 2e coupling constants in the compressed matrix form.
+          implicit none
+          integer,intent(out),allocatable::lc2(:,:)
+          real(8),intent(out),allocatable::vc2(:)
+          integer::n2
+          integer,allocatable::lbf(:,:)
+          real(8),allocatable::vbf(:)
+          ! Get memory for the working space.
+          allocate(lbf(6,lbfnz_))
+          allocate(vbf(lbfnz_))
+          ! Evaluate (E_ij E_kl) part with resolution of identity.
+          n2=0
+          call cc2eijekl_(n2,lbf,vbf)
+          ! Evaluate (delta_kj E_il) part.
+          call cc2dkjeil_(n2,lbf,vbf)
+          ! Get memory and set the values evaluated above.
+          allocate(lc2(6,n2))
+          allocate(vc2(n2))
+          lc2(:,:n2)=lbf(:,:n2)
+          vc2(:n2)=vbf(:n2)
+        end subroutine
+
         subroutine addnz1_(ic,jc,im,jm,val,n,l,v)
           ! Add indies and value of nonzero 1e constants to the list.
           implicit none
@@ -266,20 +318,25 @@
             if (lbr(1,it)>jm) then
               exit
             end if
-            ! Frist term.
+            ! Frist term contribution.
             kc=lbr(2,it)
             jc=lbr(3,it)
             do ic=1,jc-1
               ijc=ip_(ic,jc)
               gt(ijc)=gt(ijc)+gr(ip_(ic,kc))*vbr(it)
             end do
-            ! Second term.
+            ! Second term contribution.
             ic=lbr(2,it)
             kc=lbr(3,it)
             do jc=ic+1,nc
               ijc=ip_(ic,jc)
               gt(ijc)=gt(ijc)-vbr(it)*gr(ip_(kc,jc))
             end do
+          end do
+          do ijc=1,nc2
+            if (ABS(gt(ijc))>TOL_CC_) then
+              call iup_(ijc,jc,ic)
+            end if
           end do
           gr(:)=gt(:)
         end subroutine
@@ -289,30 +346,18 @@
           integer,intent(in)::nfc,nac,lplds(:,:,:)
           integer,intent(inout)::nbf,lbf(:,:)
           real(8),intent(inout)::vbf(:)
-          integer::im,jm,ic,jc,kc,nc,nc2,it,ijc,ip,np
+          integer::im,jm,ic,jc,nc,nc2,ijc
           integer::nbr
-          integer,allocatable::lbr(:,:),ibr(:),nlbf(:),llbf(:,:,:)
-          real(8),allocatable::vbr(:),gr(:),vlbf(:,:)
+          integer,allocatable::lbr(:,:),ibr(:)
+          real(8),allocatable::vbr(:),gr(:)
           ! Get memory.
           nc=SIZE(lplds(1,1,:))
           nc2=ip_(nc,nc)
-          np=1
-!$omp     parallel shared(np)
-!$        np=omp_get_num_threads()
-!$omp     end parallel
-          allocate(nlbf(np))
-          allocate(llbf(4,lbfnz_,np))
-          allocate(vlbf(lbfnz_,np))
-          nlbf(:)=0
           ! Load and mount the basic generator.
           call mountbt_(nac,nfc,nbf,lbf,vbf,nbr,lbr,ibr,vbr)
           ! Evaluate raising generators.
-!$omp     parallel private(ip,im,jm,it,ic,jc,ijc,kc,gr)
           allocate(gr(nc2))
-!$omp     do schedule(dynamic)
           do im=1,nac-1
-            ip=1
-!$          ip=omp_get_thread_num()+1
             ! Set the initial value.
             call cpbrnz_(im,nbr,lbr,vbr,gr)
             ! Evaluate the 1e constants and dump them on the memory.
@@ -323,20 +368,15 @@
                 if (ABS(gr(ijc))>TOL_CC_) then
                 call iup_(ijc,jc,ic)
                   call addnz1_(
-     &              jc,ic,nfc+jm+1,nfc+im,gr(ijc),
-     &              nlbf(ip),llbf(:,:,ip),vlbf(:,ip))
+     &              jc,ic,nfc+jm+1,nfc+im,gr(ijc),nbf,lbf,vbf)
                 end if
               end do
             end do
           end do
-!$omp     end do
-!$omp     end parallel
-          ! Collect the results.
-          call clctnz_(nlbf,llbf,vlbf,nbf,lbf,vbf)
         end subroutine
 
         subroutine mknz1_(nfc,nac,lplds)
-          ! Naive implementation of 1e coupling constants (CAS).
+          ! Evaluate 1e coupling constants (CAS) and store nonzeros.
           implicit none
           integer,intent(in)::nfc,nac,lplds(:,:,:)
           integer::nbf
@@ -358,59 +398,6 @@
           allocate(v1_(n1_))
           l1_(:,:n1_)=lbf(:,:n1_)
           v1_(:n1_)=vbf(:n1_)
-        end subroutine
-
-        subroutine uga_cc1(lc1,vc1)
-          ! 1e coupling constatns in the compressed matrix form.
-          implicit none
-          integer,intent(out),allocatable::lc1(:,:)
-          real(8),intent(out),allocatable::vc1(:)
-          integer::nnz1,ir,inz
-          integer,allocatable::lbf(:,:)
-          real(8),allocatable::vbf(:)
-          ! Get memory for the working space.
-          allocate(lbf(4,lbfnz_))
-          allocate(vbf(lbfnz_))
-          ! Pick up nonzero values for RAS from CAS.
-          nnz1=0
-          do inz=1,n1_
-            ir=mcr_(l1_(1,inz))
-            if (ir>0) then
-              nnz1=nnz1+1
-              lbf(1,nnz1)=ir
-              lbf(2,nnz1)=mcr_(l1_(2,inz))
-              lbf(3,nnz1)=l1_(3,inz)
-              lbf(4,nnz1)=l1_(4,inz)
-              vbf(nnz1)=v1_(inz)
-            end if
-          end do
-          ! Get memory and set the picked values.
-          allocate(lc1(4,nnz1),vc1(nnz1))
-          lc1(:,:nnz1)=lbf(:,:nnz1)
-          vc1(:nnz1)=vbf(:nnz1)
-        end subroutine
-
-        subroutine uga_cc2(lc2,vc2)
-          ! 2e coupling constants in the compressed matrix form.
-          implicit none
-          integer,intent(out),allocatable::lc2(:,:)
-          real(8),intent(out),allocatable::vc2(:)
-          integer::n2
-          integer,allocatable::lbf(:,:)
-          real(8),allocatable::vbf(:)
-          ! Get memory for the working space.
-          allocate(lbf(6,lbfnz_))
-          allocate(vbf(lbfnz_))
-          ! Evaluate (E_ij E_kl) part with resolution of identity.
-          n2=0
-          call cc2eijekl_(n2,lbf,vbf)
-          ! Evaluate (delta_kj E_il) part.
-          call cc2dkjeil_(n2,lbf,vbf)
-          ! Get memory and set the values evaluated above.
-          allocate(lc2(6,n2))
-          allocate(vc2(n2))
-          lc2(:,:n2)=lbf(:,:n2)
-          vc2(:n2)=vbf(:n2)
         end subroutine
 
         subroutine loadcc1_(it,ic,jc,im,jm,a1)
@@ -440,45 +427,31 @@
             ncmp(ic)=ncmp(ic)+1
             lcmp(ncmp(ic),ic)=it
             jc=l1_(2,it)
-            if (ic /= jc) then
+            if (ic/=jc) then
               ncmp(jc)=ncmp(jc)+1
               lcmp(ncmp(jc),jc)=it
             end if
           end do
         end subroutine
 
-        subroutine cc2eijekl_(n2,lbf,vbf)
+        subroutine cc2eijekl_(nbf,lbf,vbf)
           ! Evaluate (delta_kj E_il) part of the 2e coupling constant.
           implicit none
-          integer,intent(inout)::n2,lbf(:,:)
+          integer,intent(inout)::nbf,lbf(:,:)
           real(8),intent(inout)::vbf(:)
           integer::it,jt,iw,jw,ic,jc,im,jm
           real(8)::a1
-          integer::ip,np,ipt
-          integer,allocatable::nlb(:),llb(:,:,:),lcmp(:,:),ncmp(:)
-          real(8),allocatable::vlb(:,:)
+          integer::ipt
+          integer,allocatable::lcmp(:,:),ncmp(:)
           logical::go
-          ! Get memory.
-!$omp     parallel shared(np)
-          np=1
-!$        np=omp_get_num_threads()
-!$omp     end parallel
-          allocate(nlb(np))
-          allocate(llb(6,lbfnz_,np))
-          allocate(vlb(lbfnz_,np))
           ! Get the list of index to be scanned.
           call getlcmp(ncmp,lcmp)
           ! Evaluate 2e constants using nonzero values of 1e constants.
-          nlb(:)=0
-!$omp     parallel private(it,ip,ic,jc,im,jm,a1,iw,jt,ipt,jw,go)
-!$omp     do schedule(dynamic)
           do it=1,n1_
-            ip=1
-!$          ip=omp_get_thread_num()+1
             call loadcc1_(it,ic,jc,im,jm,a1)
             do iw=1,ncmp(ic)
               jt=lcmp(iw,ic)
-              call addifnz2_(it,jt,nlb(ip),llb(:,:,ip),vlb(:,ip))
+              call addifnz2_(it,jt,nbf,lbf,vbf)
             end do
             ipt=1
             do jw=1,ncmp(jc)
@@ -492,14 +465,10 @@
                 end if
               end do
               if (go) then
-                call addifnz2_(it,jt,nlb(ip),llb(:,:,ip),vlb(:,ip))
+                call addifnz2_(it,jt,nbf,lbf,vbf)
               end if
             end do
           end do
-!$omp     end do
-!$omp     end parallel
-          ! Collect the results.
-          call clctnz_(nlb,llb,vlb,n2,lbf,vbf)
         end subroutine
 
         subroutine addifnz2_(it,jt,nbf,lbf,vbf)
@@ -552,24 +521,6 @@
           end if
         end subroutine
 
-        subroutine clctnz_(nlb,llb,vlb,nbf,lbf,vbf)
-          ! Collect the nonzero values.
-          implicit none
-          integer,intent(in)::nlb(:),llb(:,:,:)
-          real(8),intent(in)::vlb(:,:)
-          integer,intent(inout)::nbf,lbf(:,:)
-          real(8),intent(inout)::vbf(:)
-          integer::ip,np,it
-          np=SIZE(nlb)
-          do ip=1,np
-            do it=1,nlb(ip)
-              nbf=nbf+1
-              lbf(:,nbf)=llb(:,it,ip)
-              vbf(nbf)=vlb(it,ip)
-            end do
-          end do
-        end subroutine
-
         subroutine cc2dkjeil_(n2,lbf,vbf)
           ! Evaluate (delta_kj E_il) part of the 2e coupling constant.
           implicit none
@@ -590,36 +541,6 @@
             end do
           end do
         end subroutine
-
-!       logical function is_possible_(ic,jc,im,jm,lplds) result(res)
-!         ! Apply the selection rules of 1e constants.
-!         implicit none
-!         integer,intent(in)::ic,jc,im,jm,lplds(:,:,:)
-!         real(8)::v1,v2
-!         integer::ntmp,na,i
-!         res=.false.
-!         ! Type (i)
-!         na=SIZE(lplds(1,:,1))
-!         do i=1,na-jm+1
-!           ntmp=SUM((lplds(:,i,ic)-lplds(:,i,jc))**2)
-!           if (ntmp>0) then
-!             return
-!           end if
-!         end do
-!         ! Type (ii)
-!         na=SIZE(lplds(1,:,1))
-!         call genweight_(jc,jm,lplds,v1)
-!         call genweight_(ic,jm,lplds,v2)
-!         if ((v1-v2-1d0)**2>TOL_) then
-!           return
-!         end if
-!         call genweight_(jc,im,lplds,v1)
-!         call genweight_(ic,im,lplds,v2)
-!         if ((v1-v2+1d0)**2>TOL_) then
-!           return
-!         end if
-!         res=.true.
-!       end function
 
         subroutine genbasica_(jc,im,lplds,ic,val)
           ! Basic raising generator for the case (im+1=jm) (Type A).

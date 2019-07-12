@@ -1,7 +1,10 @@
       module eval
         ! Molecular integral evaluation (S, P, and D).
+        !
         ! Reference:
+        !
         !     H. Taketa et. al., J. Phys. Soc. Jpn. 21, 2313 (1966).
+        !
         implicit none
         private
         real(8),parameter::PI=3.1415926535897931d0,TWOETOL=1d-8
