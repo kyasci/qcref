@@ -9,7 +9,7 @@
         real(8),parameter::TOL_=1d-10,TOL_CC_=1d-5
         logical::init_=.false.
         integer::lbfnz_=10000000,n1_
-        integer,allocatable::l1_(:,:),mcr_(:),mrc_(:)
+        integer,allocatable::l1_(:,:),mcr_(:),mrc_(:),mcf_(:,:)
         real(8),allocatable::v1_(:)
         ! Used for profiling.
         !---------------------------------------------------------------
@@ -39,11 +39,42 @@
           ! Make a list of Paldus tables.
           nea=ne-2*nfc
           call uga_pltab(nea,nac,mult,lplds)
+          ! Make a list of configuration.
+          call mkconf_(lplds)
           ! Make a list of index for RAS and CAS.
-          call mkras_(nea,mult,nx,lplds)
+          call mkras_(nx,lplds)
           ! Make nonzero values of the 1e coupling constants (CAS).
           call mknz1_(nfc,nac,lplds)
           ! Index table for the quick access to 1e coupling constant.
+        end subroutine
+
+        subroutine mkconf_(lplds)
+          implicit none
+          integer,intent(in)::lplds(:,:,:)
+          integer::nc,nac,ic,im,md(3),ldwn(3)
+          nc=SIZE(lplds(1,1,:))
+          nac=SIZE(lplds(1,:,1))
+          allocate(mcf_(nac,nc))
+          mcf_(:,:)=0
+          do ic=1,nc
+            do im=1,nac
+              if (im==nac) then
+                ldwn(:)=(/0,0,0/)
+              else
+                ldwn(:)=lplds(:,im+1,ic)
+              end if
+              md(:)=lplds(:,im,ic)-ldwn(:)
+              if (md(1)==0.and.md(2)==0.and.md(3)==1) then
+                mcf_(nac-im+1,ic)=0
+              else if (md(1)==0.and.md(2)==1.and.md(3)==0) then
+                mcf_(nac-im+1,ic)=1
+              else if (md(1)==1.and.md(2)==-1.and.md(3)==1) then
+                mcf_(nac-im+1,ic)=-1
+              else if (md(1)==1.and.md(2)==0.and.md(3)==0) then
+                mcf_(nac-im+1,ic)=2
+              end if
+            end do
+          end do
         end subroutine
 
         subroutine uga_pltab(nea,nac,mult,lplds)
@@ -89,6 +120,7 @@
           deallocate(v1_)
           deallocate(mcr_)
           deallocate(mrc_)
+          deallocate(mcf_)
           init_=.false.
         end subroutine
 
@@ -112,15 +144,15 @@
           end if
         end subroutine
 
-        subroutine mkras_(nea,mult,nx,lplds)
+        subroutine mkras_(nx,lplds)
           ! Make a list of index for the relationship of RAS and CAS.
           implicit none
-          integer,intent(in)::nea,mult,nx,lplds(:,:,:)
-          integer::ic,nt,im,nc,nr
+          integer,intent(in)::nx,lplds(:,:,:)
+          integer::ic,nt,im,nm,nc,nr,nd
           integer,allocatable::mwork(:)
-          real(8)::vt
           ! Get memoery.
           nc=SIZE(lplds(1,1,:))
+          nm=SIZE(lplds(1,:,1))
           allocate(mwork(nc))
           allocate(mcr_(nc))
           ! Set -1 to show there is no corresponding index.
@@ -128,12 +160,18 @@
           nr=0
           ! Evaluation.
           do ic=1,nc
-            nt=0
-            do im=1,(nea+(mult-1))/2
-              call genweight_(ic,im,lplds,vt)
-              nt=nt+NINT(vt)
+            nd=0
+            do im=1,nm
+              nt=ABS(mcf_(im,ic)-mcf_(im,1))
+              if (mcf_(im,ic)==-1.and.mcf_(im,1)==2) then
+                nt=1
+              else if (mcf_(im,ic)==2.and.mcf_(im,1)==-1) then
+                nt=1
+              end if
+              nd=nd+nt
             end do
-            if (nt>=(nea-nx)) then
+            nd=nd/2
+            if (nd<=nx) then
               nr=nr+1
               mwork(nr)=ic
               mcr_(ic)=nr
@@ -219,7 +257,7 @@
           nc=SIZE(lplds(1,1,:))
           do im=1,nac
             do ic=1,nc
-              call genweight_(ic,im,lplds,a1)
+              a1=ABS(mcf_(im,ic))
               if (ABS(a1)>TOL_CC_) then
                 call addnz1_(ic,ic,nfc+im,nfc+im,a1,nbf,lbf,vbf)
               end if
@@ -616,24 +654,6 @@
               end if
             end do
           end if
-        end subroutine
-
-        subroutine genweight_(ic,im,lplds,val)
-          ! Weight generator for the case (im=jm).
-          integer,intent(in)::ic,im,lplds(:,:,:)
-          real(8),intent(out)::val
-          real(8)::ai,bi,aim,bim
-          integer::nac
-          nac=SIZE(lplds(1,:,1))
-          ai=lplds(1,nac+1-im,ic)
-          bi=lplds(2,nac+1-im,ic)
-          aim=0d0
-          bim=0d0
-          if (im>1) then
-            aim=lplds(1,nac+1-(im-1),ic)
-            bim=lplds(2,nac+1-(im-1),ic)
-          end if
-          val=2d0*(ai-aim)+(bi-bim)
         end subroutine
 
         subroutine table1_(ma,mb,mc,n,num)
