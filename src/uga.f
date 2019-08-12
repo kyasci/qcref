@@ -20,6 +20,7 @@
      &    uga_dim,
      &    uga_cc1,
      &    uga_cc2,
+     &    uga_ecf,
      &    uga_seti
         !---------------------------------------------------------------
 
@@ -48,14 +49,32 @@
           ! Index table for the quick access to 1e coupling constant.
         end subroutine
 
+        subroutine uga_ecf(lecf)
+          ! Return the list of electronic configurations.
+          implicit none
+          integer,intent(out),allocatable::lecf(:,:)
+          integer::nac,nc
+          nc=SIZE(mcf_(1,:))
+          nac=SIZE(mcf_(:,1))
+          allocate(lecf(nac,nc))
+          lecf(:,:)=mcf_(:,:)
+        end subroutine
+
         subroutine mkconf_(lplds)
+          ! Make a list of electronic configurations.
           implicit none
           integer,intent(in)::lplds(:,:,:)
           integer::nc,nac,ic,im,md(3),ldwn(3)
           nc=SIZE(lplds(1,1,:))
           nac=SIZE(lplds(1,:,1))
+          ! Get memory.
           allocate(mcf_(nac,nc))
           mcf_(:,:)=0
+          ! Electronic configuration:
+          !     2: doubly occupied
+          !     1: alpha spin occupied.
+          !    -1: beta spin occupied.
+          !     0: unoccupied.
           do ic=1,nc
             do im=1,nac
               if (im==nac) then
@@ -82,7 +101,7 @@
           implicit none
           integer,intent(in)::nea,nac,mult
           integer,intent(out),allocatable::lplds(:,:,:)
-          integer::ma,mb,mc,np,lt(3,4),ip,im,ih,it,nc,nt
+          integer::ma,mb,mc,np,lt(3,4),ipt,im,ih,it,nc,nt
           integer,allocatable::mwork(:,:,:)
           ! Generate Paldus table for a complete active space.
           mb=mult-1
@@ -97,14 +116,14 @@
           np=1
           do im=1,nac-1
             ih=0
-            do ip=1,np
-              ma=lplds(1,im,ip)
-              mb=lplds(2,im,ip)
-              mc=lplds(3,im,ip)
+            do ipt=1,np
+              ma=lplds(1,im,ipt)
+              mb=lplds(2,im,ipt)
+              mc=lplds(3,im,ipt)
               call table1_(ma,mb,mc,nt,lt)
               do it=1,nt
                 ih=ih+1
-                mwork(:,:,ih)=lplds(:,:,ip)
+                mwork(:,:,ih)=lplds(:,:,ipt)
                 mwork(:,im+1,ih)=(/ma,mb,mc/)-lt(:,it)
               end do
               np=ih
