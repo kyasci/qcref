@@ -8,9 +8,13 @@
         private
         real(8),parameter::TOL_=1d-10,TOL_CC_=1d-5
         logical::init_=.false.
-        integer::lbfnz_=10000000,n1_
-        integer,allocatable::l1_(:,:),mcr_(:),mrc_(:),mcf_(:,:)
+        integer::lbfnz_=300000000,n1_,nrsc_=9
+        integer,allocatable::
+     &    l1_(:,:),mcr_(:),mrc_(:),mcf_(:,:),lplds_(:,:,:)
         real(8),allocatable::v1_(:)
+        !
+        integer,allocatable::lrsc_(:)
+        !
         ! Used for profiling.
         !---------------------------------------------------------------
         public::
@@ -40,13 +44,14 @@
           ! Make a list of Paldus tables.
           nea=ne-2*nfc
           call uga_pltab(nea,nac,mult,lplds)
+          ! Make the ranges of scanning.
+          call mkrscan_()
           ! Make a list of configuration.
-          call mkconf_(lplds)
+          call mkconf_()
           ! Make a list of index for RAS and CAS.
-          call mkras_(nx,lplds)
+          call mkras_(nx)
           ! Make nonzero values of the 1e coupling constants (CAS).
-          call mknz1_(nfc,nac,lplds)
-          ! Index table for the quick access to 1e coupling constant.
+          call mknz1_(nfc,nac)
         end subroutine
 
         subroutine uga_ecf(lecf)
@@ -60,29 +65,28 @@
           lecf(:,:)=mcf_(:,:)
         end subroutine
 
-        subroutine mkconf_(lplds)
+        subroutine mkconf_()
           ! Make a list of electronic configurations.
-          implicit none
-          integer,intent(in)::lplds(:,:,:)
-          integer::nc,nac,ic,im,md(3),ldwn(3)
-          nc=SIZE(lplds(1,1,:))
-          nac=SIZE(lplds(1,:,1))
-          ! Get memory.
-          allocate(mcf_(nac,nc))
-          mcf_(:,:)=0
           ! Electronic configuration:
           !     2: doubly occupied
           !     1: alpha spin occupied.
           !    -1: beta spin occupied.
           !     0: unoccupied.
+          implicit none
+          integer::nc,nac,ic,im,md(3),ldwn(3)
+          nc=SIZE(lplds_(1,1,:))
+          nac=SIZE(lplds_(1,:,1))
+          ! Get memory.
+          allocate(mcf_(nac,nc))
+          mcf_(:,:)=0
           do ic=1,nc
             do im=1,nac
               if (im==nac) then
                 ldwn(:)=(/0,0,0/)
               else
-                ldwn(:)=lplds(:,im+1,ic)
+                ldwn(:)=lplds_(:,im+1,ic)
               end if
-              md(:)=lplds(:,im,ic)-ldwn(:)
+              md(:)=lplds_(:,im,ic)-ldwn(:)
               if (md(1)==0.and.md(2)==0.and.md(3)==1) then
                 mcf_(nac-im+1,ic)=0
               else if (md(1)==0.and.md(2)==1.and.md(3)==0) then
@@ -109,27 +113,81 @@
           mc=nac-ma-mb
           call dimcas_(nac,ma,mb,mc,nc)
           allocate(lplds(3,nac,nc))
+          allocate(lplds_(3,nac,nc))
           allocate(mwork(3,nac,nc))
-          lplds(:,:,:)=0
+          lplds_(:,:,:)=0
           mwork(:,:,:)=0
-          lplds(:,1,1)=(/ma,mb,mc/)
+          lplds_(:,1,1)=(/ma,mb,mc/)
           np=1
           do im=1,nac-1
             ih=0
             do ipt=1,np
-              ma=lplds(1,im,ipt)
-              mb=lplds(2,im,ipt)
-              mc=lplds(3,im,ipt)
+              ma=lplds_(1,im,ipt)
+              mb=lplds_(2,im,ipt)
+              mc=lplds_(3,im,ipt)
               call table1_(ma,mb,mc,nt,lt)
               do it=1,nt
                 ih=ih+1
-                mwork(:,:,ih)=lplds(:,:,ipt)
+                mwork(:,:,ih)=lplds_(:,:,ipt)
                 mwork(:,im+1,ih)=(/ma,mb,mc/)-lt(:,it)
               end do
               np=ih
             end do
-            lplds(:,:,:)=mwork(:,:,:)
+            lplds_(:,:,:)=mwork(:,:,:)
           end do
+          lplds(:,:,:)=lplds_(:,:,:)
+        end subroutine
+
+        subroutine mkrscan_()
+          ! Make the range of scanning.
+          ! NOTE: This algo is simple but redundant compared to GUGA.
+          implicit none
+          integer::it,nt,nc,nac
+          nc=SIZE(lplds_(1,1,:))
+          nac=SIZE(lplds_(1,:,1))
+          nrsc_=min(nac,nrsc_)
+          allocate(lrsc_(4**nrsc_+1))
+          lrsc_(:)=1
+          do it=1,nc
+            call getirsc_(lplds_(:,:,it),nt)
+            lrsc_(nt+1:)=it
+          end do
+        end subroutine
+
+        subroutine getirsc_(lpldsp,irsc)
+          ! Get the index of irscan.
+          implicit none
+          integer,intent(in)::lpldsp(:,:)
+          integer,intent(out)::irsc
+          integer::it,nt
+          irsc=1
+          do it=1,nrsc_-1
+            call getirscan1_(lpldsp,it,nt)
+            irsc=irsc+nt
+          end do
+        end subroutine
+
+        subroutine getirscan1_(lpldsp,n,m)
+          ! Return the index of irscan of the specified row.
+          implicit none
+          integer,intent(in)::lpldsp(:,:),n
+          integer,intent(out)::m
+          integer::mda,mdb,mdc,mt
+          ! nac=SIZE(lpldsp(1,:))
+          mda=lpldsp(1,n+1)-lpldsp(1,n)
+          mdb=lpldsp(2,n+1)-lpldsp(2,n)
+          mdc=lpldsp(3,n+1)-lpldsp(3,n)
+          mt=0
+          if (mda==0.and.mdb==0.and.mdc==-1) then
+            mt=0
+          else if (mda==0.and.mdb==-1.and.mdc==0) then
+            mt=1
+          else if (mda==-1.and.mdb==1.and.mdc==-1) then
+            mt=2
+          else if (mda==-1.and.mdb==0.and.mdc==0) then
+            mt=3
+          end if
+          m=mt*4**(nrsc_-n-1)
         end subroutine
 
         subroutine uga_del()
@@ -140,6 +198,8 @@
           deallocate(mcr_)
           deallocate(mrc_)
           deallocate(mcf_)
+          deallocate(lrsc_)
+          deallocate(lplds_)
           init_=.false.
         end subroutine
 
@@ -159,19 +219,19 @@
             lbfnz_=num
           else
             write(*,'("error: unrecognized key: ",a)') key
-            stop 1
+            stop
           end if
         end subroutine
 
-        subroutine mkras_(nx,lplds)
+        subroutine mkras_(nx)
           ! Make a list of index for the relationship of RAS and CAS.
           implicit none
-          integer,intent(in)::nx,lplds(:,:,:)
+          integer,intent(in)::nx
           integer::ic,nt,im,nm,nc,nr,nd
           integer,allocatable::mwork(:)
           ! Get memoery.
-          nc=SIZE(lplds(1,1,:))
-          nm=SIZE(lplds(1,:,1))
+          nc=SIZE(lplds_(1,1,:))
+          nm=SIZE(lplds_(1,:,1))
           allocate(mwork(nc))
           allocate(mcr_(nc))
           ! Set -1 to show there is no corresponding index.
@@ -262,180 +322,181 @@
           real(8),intent(inout)::v(:)
           n=n+1
           l(:,n)=(/ic,jc,im,jm/)
-          v(n)=val 
+          v(n)=val
         end subroutine
 
-        subroutine add1weight_(nfc,nac,lplds,nbf,lbf,vbf)
-          ! Weight generator contributions to 1e constants (CAS).
+        subroutine add1generator_(nfc,nac,nbf,lbf,vbf)
+          ! Weight and raising generators for 1e constants (CAS).
           implicit none
-          integer,intent(in)::nfc,nac,lplds(:,:,:)
+          integer,intent(in)::nfc,nac
           integer,intent(inout)::nbf,lbf(:,:)
           real(8),intent(inout)::vbf(:)
-          integer::im,ic,nc
-          real(8)::a1
-          nc=SIZE(lplds(1,1,:))
+          integer::im,jm,nc,nij,it
+          integer,allocatable::lij(:,:)
+          real(8),allocatable::vij(:)
+          nc=SIZE(lplds_(1,1,:))
+          allocate(lij(2,nac*nc),vij(nac*nc))
           do im=1,nac
-            do ic=1,nc
-              a1=ABS(mcf_(im,ic))
-              if (ABS(a1)>TOL_CC_) then
-                call addnz1_(ic,ic,nfc+im,nfc+im,a1,nbf,lbf,vbf)
-              end if
-            end do
-          end do
-        end subroutine
-
-        subroutine add1basic_(nfc,nac,lplds,nbf,lbf,vbf)
-          ! Basic generator contributions to 1e constants (CAS).
-          integer,intent(in)::nfc,nac,lplds(:,:,:)
-          integer,intent(inout)::nbf,lbf(:,:)
-          real(8),intent(inout)::vbf(:)
-          integer::im,ic,jc,nc
-          real(8)::a1
-          nc=SIZE(lplds(1,1,:))
-          do im=1,nac-1
-            do jc=1,nc
-              ! Type A
-              call genbasica_(jc,im,lplds,ic,a1)
-              if (ABS(a1)>TOL_CC_) then
-                call addnz1_(jc,ic,nfc+im+1,nfc+im,a1,nbf,lbf,vbf)
-              end if
-              call genbasicb_(jc,im,lplds,ic,a1)
-              if (ABS(a1)>TOL_CC_) then
-                call addnz1_(jc,ic,nfc+im+1,nfc+im,a1,nbf,lbf,vbf)
-              end if
-            end do
-          end do
-        end subroutine
-
-        subroutine mountbt_(nac,nfc,nbf,lbf,vbf,nbr,lbr,ibr,vbr)
-          ! Mount the nonzero values of the basic generator.
-          implicit none
-          integer,intent(in)::nac,nfc,nbf,lbf(:,:)
-          real(8),intent(in)::vbf(:)
-          integer,intent(out)::nbr
-          integer,intent(out),allocatable::lbr(:,:),ibr(:)
-          real(8),intent(out),allocatable::vbr(:)
-          integer::it,ic,jc,im,jm
-          real(8)::a1
-          allocate(lbr(3,lbfnz_))
-          allocate(ibr(nac))
-          allocate(vbr(lbfnz_))
-          nbr=0
-          ibr(:)=0
-          do it=1,nbf
-            jc=lbf(1,it)
-            ic=lbf(2,it)
-            jm=lbf(3,it)-nfc
-            im=lbf(4,it)-nfc
-            a1=vbf(it)
-            if (im+1==jm) then
-              nbr=nbr+1
-              lbr(:,nbr)=(/im,ic,jc/)
-              vbr(nbr)=a1
-              if (ibr(im)==0) then
-                ibr(im)=nbr
-              end if
-            end if
-          end do
-        end subroutine
-
-        subroutine cpbrnz_(im,nbr,lbr,vbr,gr)
-          ! copy the nonzero values of basic generator matrix elements.
-          implicit none
-          integer,intent(in)::im,nbr,lbr(:,:)
-          real(8),intent(in)::vbr(:)
-          real(8),intent(out)::gr(:)
-          integer::it,ijc
-          gr(:)=0d0
-          do it=1,nbr
-            if (lbr(1,it)==im) then
-              ijc=ip_(lbr(2,it),lbr(3,it))
-              gr(ijc)=vbr(it)
-            end if
-            if (lbr(1,it)>im) then
-              exit
-            end if
-          end do
-        end subroutine
-
-        subroutine evalgr_(jm,gr,nbr,ibr,lbr,vbr)
-          ! Evaluate raising generator matrix elements for the given jm.
-          implicit none
-          integer,intent(in)::jm,nbr,ibr(:),lbr(:,:)
-          real(8),intent(in)::vbr(:)
-          real(8),intent(inout)::gr(:)
-          real(8),allocatable::gt(:)
-          integer::ic,jc,kc,ijc,nc,it,ngr,nc2
-          nc2=SIZE(gr)
-          call iup_(nc2,nc,ic)
-          allocate(gt(SIZE(gr)))
-          gt(:)=0d0
-          ngr=0
-          do it=ibr(jm),nbr
-            if (lbr(1,it)>jm) then
-              exit
-            end if
-            ! Frist term contribution.
-            kc=lbr(2,it)
-            jc=lbr(3,it)
-            do ic=1,jc-1
-              ijc=ip_(ic,jc)
-              gt(ijc)=gt(ijc)+gr(ip_(ic,kc))*vbr(it)
-            end do
-            ! Second term contribution.
-            ic=lbr(2,it)
-            kc=lbr(3,it)
-            do jc=ic+1,nc
-              ijc=ip_(ic,jc)
-              gt(ijc)=gt(ijc)-vbr(it)*gr(ip_(kc,jc))
-            end do
-          end do
-          do ijc=1,nc2
-            if (ABS(gt(ijc))>TOL_CC_) then
-              call iup_(ijc,jc,ic)
-            end if
-          end do
-          gr(:)=gt(:)
-        end subroutine
-
-        subroutine add1raising_(nfc,nac,lplds,nbf,lbf,vbf)
-          ! Reising generator contributions to 1e constants (CAS).
-          integer,intent(in)::nfc,nac,lplds(:,:,:)
-          integer,intent(inout)::nbf,lbf(:,:)
-          real(8),intent(inout)::vbf(:)
-          integer::im,jm,ic,jc,nc,nc2,ijc
-          integer::nbr
-          integer,allocatable::lbr(:,:),ibr(:)
-          real(8),allocatable::vbr(:),gr(:)
-          ! Get memory.
-          nc=SIZE(lplds(1,1,:))
-          nc2=ip_(nc,nc)
-          ! Load and mount the basic generator.
-          call mountbt_(nac,nfc,nbf,lbf,vbf,nbr,lbr,ibr,vbr)
-          ! Evaluate raising generators.
-          allocate(gr(nc2))
-          do im=1,nac-1
-            ! Set the initial value.
-            call cpbrnz_(im,nbr,lbr,vbr,gr)
-            ! Evaluate the 1e constants and dump them on the memory.
-            do jm=im+1,nac-1
-              call evalgr_(jm,gr,nbr,ibr,lbr,vbr)
-              ! Damp
-              do ijc=1,nc2
-                if (ABS(gr(ijc))>TOL_CC_) then
-                call iup_(ijc,jc,ic)
-                  call addnz1_(
-     &              jc,ic,nfc+jm+1,nfc+im,gr(ijc),nbf,lbf,vbf)
-                end if
+            do jm=im,nac
+              call gen_(im,jm,nij,lij,vij)
+              do it=1,nij
+                call addnz1_(
+     &            lij(2,it),lij(1,it),nfc+jm,nfc+im,vij(it),nbf,lbf,vbf)
               end do
             end do
           end do
         end subroutine
 
-        subroutine mknz1_(nfc,nac,lplds)
+        recursive subroutine gen_(im,jm,nij,lij,vij)
+          ! General interface of generator.
+          implicit none
+          integer,intent(in)::im,jm
+          integer,intent(out)::nij,lij(:,:)
+          real(8),intent(out)::vij(:)
+          integer::jc,it,nc,nic
+          integer,allocatable::lic(:)
+          real(8),allocatable::vic(:)
+          nc=SIZE(lplds_(1,1,:))
+          ! Weight generator.
+          if (im==jm) then
+            call genweight_(im,nij,lij(1,:),vij)
+            lij(2,:)=lij(1,:)
+          ! Basic rasing generator.
+          else if (im+1==jm) then
+            nij=0
+            allocate(lic(nc),vic(nc))
+            do jc=1,nc
+              call genbasic_(jc,im,nic,lic,vic)
+              do it=1,nic
+                nij=nij+1
+                lij(:,nij)=(/lic(it),jc/)
+                vij(nij)=vic(it)
+              end do
+            end do
+          ! General rasing generator.
+          else if (im+1<jm) then
+            nij=0
+            allocate(lic(nc),vic(nc))
+            do jc=1,nc
+              call genraise_(jc,im,jm,nic,lic,vic)
+              do it=1,nic
+                nij=nij+1
+                lij(:,nij)=(/lic(it),jc/)
+                vij(nij)=vic(it)
+              end do
+            end do
+          else
+            call gen_(jm,im,nij,lij,vij)
+          end if
+        end subroutine
+
+        subroutine genweight_(im,nic,lic,vic)
+          ! Weight generator.
+          implicit none
+          integer,intent(in)::im
+          integer,intent(out)::nic,lic(:)
+          real(8),intent(out)::vic(:)
+          integer::ic,nc
+          real(8)::weight
+          nc=SIZE(lplds_(1,1,:))
+          nic=0
+          do ic=1,nc
+            weight=ABS(mcf_(im,ic))
+            if (weight>TOL_CC_) then
+              nic=nic+1
+              lic(nic)=ic
+              vic(nic)=weight
+            end if
+          end do
+        end subroutine
+
+        recursive subroutine genraise_(jc,im,jm,nic,lic,vic)
+          implicit none
+          integer,intent(in)::jc,im,jm
+          integer,intent(out)::nic,lic(:)
+          real(8),intent(out)::vic(:)
+          integer::nc,it,kt,nict,nkct
+          integer,allocatable::lict(:),lkct(:)
+          real(8),allocatable::vict(:),vkct(:)
+          if (im+2==jm) then
+            call genraise1_(jc,im,jm,nic,lic,vic)
+          else if (im+2<jm) then
+            nic=0
+            nc=SIZE(lplds_(1,1,:))
+            allocate(lict(nc),vict(nc),lkct(nc),vkct(nc))
+            ! (+) Contribution
+            call genbasic_(jc,jm-1,nkct,lkct,vkct)
+            do kt=1,nkct
+              call genraise_(lkct(kt),im,jm-1,nict,lict,vict)
+              do it=1,nict
+                call grupdate_(lict(it),vict(it)*vkct(kt),nic,lic,vic)
+              end do
+            end do
+            ! (-) Contribution
+            call genraise_(jc,im,jm-1,nkct,lkct,vkct)
+            do kt=1,nkct
+              call genbasic_(lkct(kt),jm-1,nict,lict,vict)
+              do it=1,nict
+                call grupdate_(lict(it),-vict(it)*vkct(kt),nic,lic,vic)
+              end do
+            end do
+          end if
+        end subroutine
+
+        subroutine genraise1_(jc,im,jm,nic,lic,vic)
+          implicit none
+          integer,intent(in)::jc,im,jm
+          integer,intent(out)::nic,lic(:)
+          real(8),intent(out)::vic(:)
+          integer,parameter::MXIC=2
+          integer::it,kt,nkct,nict,lict(MXIC),lkct(MXIC)
+          real(8)::vict(MXIC),vkct(MXIC)
+          nic=0
+          ! (+) contribution.
+          call genbasic_(jc,jm-1,nkct,lkct,vkct)
+          do kt=1,nkct
+            call genbasic_(lkct(kt),im,nict,lict,vict)
+            do it=1,nict
+              call grupdate_(lict(it),vkct(kt)*vict(it),nic,lic,vic)
+            end do
+          end do
+          ! (-) contribution.
+          call genbasic_(jc,im,nkct,lkct,vkct)
+          do kt=1,nkct
+            call genbasic_(lkct(kt),jm-1,nict,lict,vict)
+            do it=1,nict
+              call grupdate_(lict(it),-vkct(kt)*vict(it),nic,lic,vic)
+            end do
+          end do
+        end subroutine
+
+        subroutine grupdate_(ic,val,nic,lic,vic)
+          implicit none
+          integer,intent(in)::ic
+          real(8),intent(in)::val
+          integer,intent(inout)::nic,lic(:)
+          real(8),intent(inout)::vic(:)
+          logical::exists
+          integer::it
+          exists=.False.
+          do it=1,nic
+            if (lic(it)==ic) then
+              vic(it)=vic(it)+val
+              exists=.True.
+              exit
+            end if
+          end do
+          if (.not.exists) then
+            nic=nic+1
+            lic(nic)=ic
+            vic(nic)=val
+          end if
+        end subroutine
+
+        subroutine mknz1_(nfc,nac)
           ! Evaluate 1e coupling constants (CAS) and store nonzeros.
           implicit none
-          integer,intent(in)::nfc,nac,lplds(:,:,:)
+          integer,intent(in)::nfc,nac
           integer::nbf
           integer,allocatable::lbf(:,:)
           real(8),allocatable::vbf(:)
@@ -443,12 +504,8 @@
           nbf=0
           allocate(lbf(4,lbfnz_))
           allocate(vbf(lbfnz_))
-          ! Weight generators.
-          call add1weight_(nfc,nac,lplds,nbf,lbf,vbf)
-          ! Basic raising generators.
-          call add1basic_(nfc,nac,lplds,nbf,lbf,vbf)
-          ! Raising genrators.
-          call add1raising_(nfc,nac,lplds,nbf,lbf,vbf)
+          ! Weight and raising genrators.
+          call add1generator_(nfc,nac,nbf,lbf,vbf)
           ! Set the module variables.
           n1_=nbf
           allocate(l1_(4,n1_))
@@ -599,16 +656,41 @@
           end do
         end subroutine
 
+        subroutine genbasic_(jc,im,nic,lic,vic)
+          ! Basic raising generator.
+          implicit none
+          integer,intent(in)::jc,im
+          integer,intent(out)::nic,lic(:)
+          real(8),intent(out)::vic(:)
+          integer::ic
+          real(8)::a1
+          nic=0
+          ! Type A:
+          call genbasica_(jc,im,lplds_,ic,a1)
+          if (ABS(a1)>TOL_CC_) then
+            nic=nic+1
+            lic(nic)=ic
+            vic(nic)=a1
+          end if
+          ! Type B:
+          call genbasicb_(jc,im,lplds_,ic,a1)
+          if (ABS(a1)>TOL_CC_) then
+            nic=nic+1
+            lic(nic)=ic
+            vic(nic)=a1
+          end if
+        end subroutine
+
         subroutine genbasica_(jc,im,lplds,ic,val)
           ! Basic raising generator for the case (im+1=jm) (Type A).
           integer,intent(in)::jc,im,lplds(:,:,:)
           integer,intent(out)::ic
           real(8),intent(out)::val
-          integer::nac,it
-          integer,allocatable::diff(:,:)
+          integer::nac,it,irsc
+          integer,allocatable::ldiff(:,:)
           real(8)::ai,bi,aip,bip,aim,bim
           nac=SIZE(lplds(1,:,1))
-          allocate(diff(3,nac))
+          allocate(ldiff(3,nac))
           ! Start evaluation.
           ai=lplds(1,nac+1-im,jc)
           bi=lplds(2,nac+1-im,jc)
@@ -620,16 +702,17 @@
             aim=lplds(1,nac+1-(im-1),jc)
             bim=lplds(2,nac+1-(im-1),jc)
           end if
-          ic=0
           val=0d0
           if (ai==aim.and.aim==aip-1.and.ABS(bi)>TOL_) then
-            diff(:,:)=lplds(:,:,jc)
-            diff(:,nac+1-im)=diff(:,nac+1-im)+(/1,-1,0/)
+            ldiff(:,:)=lplds(:,:,jc)
+            ldiff(:,nac+1-im)=ldiff(:,nac+1-im)+(/1,-1,0/)
             val=((bi*(bi+1d0))/((bip+1d0)*(bim+1d0)))**0.5d0
           end if
+          call getirsc_(ldiff,irsc)
+          ic=0
           if (ABS(val)>TOL_) then
-            do it=jc,1,-1
-              if (SUM((diff(:,:)-lplds(:,:,it))**2)<TOL_) then
+            do it=min(jc-1,lrsc_(irsc+1)),lrsc_(irsc),-1
+              if (SUM(ABS((ldiff(:,:)-lplds(:,:,it))))<TOL_) then
                 ic=it
                 exit
               end if
@@ -642,11 +725,11 @@
           integer,intent(in)::jc,im,lplds(:,:,:)
           integer,intent(out)::ic
           real(8),intent(out)::val
-          integer::nac,it
-          integer,allocatable::diff(:,:)
+          integer::nac,it,irsc
+          integer,allocatable::ldiff(:,:)
           real(8)::bi,ci,bip,cip,bim,cim
           nac=SIZE(lplds(1,:,1))
-          allocate(diff(3,nac))
+          allocate(ldiff(3,nac))
           ! Start evaluation.
           bi=lplds(2,nac+1-im,jc)
           ci=lplds(3,nac+1-im,jc)
@@ -661,13 +744,15 @@
           ic=0
           val=0d0
           if (ci==cip.and.cip==cim+1.and.ABS(ci)>TOL_) then
-            diff(:,:)=lplds(:,:,jc)
-            diff(:,nac+1-im)=diff(:,nac+1-im)+(/0,1,-1/)
+            ldiff(:,:)=lplds(:,:,jc)
+            ldiff(:,nac+1-im)=ldiff(:,nac+1-im)+(/0,1,-1/)
             val=(((bi+1d0)*(bi+2d0))/((bip+1d0)*(bim+1d0)))**0.5d0
           end if
+          call getirsc_(ldiff,irsc)
+          ic=0
           if (ABS(val)>TOL_) then
-            do it=jc,1,-1
-              if (SUM((diff(:,:)-lplds(:,:,it))**2)<TOL_) then
+            do it=min(jc-1,lrsc_(irsc+1)),lrsc_(irsc),-1
+              if (SUM(ABS((ldiff(:,:)-lplds(:,:,it))))<TOL_) then
                 ic=it
                 exit
               end if
@@ -750,25 +835,25 @@
           end if
         end function
 
-        integer function ip_(i,j) result(ij)
-          ! Canonical index packing for a symmetric matrix.
-          implicit none
-          integer,intent(in)::i,j
-          integer::ii,jj
-          ii=max(i,j)
-          jj=min(i,j)
-          ij=(ii-1)*ii/2+jj
-        end function
+        ! integer function ip_(i,j) result(ij)
+        !   ! Canonical index packing for a symmetric matrix.
+        !   implicit none
+        !   integer,intent(in)::i,j
+        !   integer::ii,jj
+        !   ii=max(i,j)
+        !   jj=min(i,j)
+        !   ij=(ii-1)*ii/2+jj
+        ! end function
 
-        subroutine iup_(ij,i,j)
-          ! Unpack the canonical index for a symmetric matrix (1e).
-          implicit none
-          integer,intent(in)::ij
-          integer,intent(out)::i,j
-          real(8)::vt
-          vt=0.5d0*(-1d0+SQRT(1d0+8*ij))
-          i=CEILING(vt)
-          j=ij-(i-1)*i/2
-        end subroutine
+        ! subroutine iup_(ij,i,j)
+        !   ! Unpack the canonical index for a symmetric matrix (1e).
+        !   implicit none
+        !   integer,intent(in)::ij
+        !   integer,intent(out)::i,j
+        !   real(8)::vt
+        !   vt=0.5d0*(-1d0+SQRT(1d0+8*ij))
+        !   i=CEILING(vt)
+        !   j=ij-(i-1)*i/2
+        ! end subroutine
 
       end module
