@@ -35,7 +35,6 @@
           implicit none
           integer,intent(in)::ne,nfc,nac,mult,nx
           integer::nea
-          integer,allocatable::lplds(:,:,:)
           ! Clean up the data for the previous calculation.
           if (init_) then
             call uga_del()
@@ -43,7 +42,7 @@
           init_=.true.
           ! Make a list of Paldus tables.
           nea=ne-2*nfc
-          call uga_pltab(nea,nac,mult,lplds)
+          call uga_pltab(nea,nac,mult,lplds_)
           ! Make the ranges of scanning.
           call mkrscan_()
           ! Make a list of configuration.
@@ -113,29 +112,28 @@
           mc=nac-ma-mb
           call dimcas_(nac,ma,mb,mc,nc)
           allocate(lplds(3,nac,nc))
-          allocate(lplds_(3,nac,nc))
           allocate(mwork(3,nac,nc))
-          lplds_(:,:,:)=0
+          lplds(:,:,:)=0
           mwork(:,:,:)=0
-          lplds_(:,1,1)=(/ma,mb,mc/)
+          lplds(:,1,1)=(/ma,mb,mc/)
           np=1
           do im=1,nac-1
             ih=0
             do ipt=1,np
-              ma=lplds_(1,im,ipt)
-              mb=lplds_(2,im,ipt)
-              mc=lplds_(3,im,ipt)
+              ma=lplds(1,im,ipt)
+              mb=lplds(2,im,ipt)
+              mc=lplds(3,im,ipt)
               call table1_(ma,mb,mc,nt,lt)
               do it=1,nt
                 ih=ih+1
-                mwork(:,:,ih)=lplds_(:,:,ipt)
+                mwork(:,:,ih)=lplds(:,:,ipt)
                 mwork(:,im+1,ih)=(/ma,mb,mc/)-lt(:,it)
               end do
               np=ih
             end do
-            lplds_(:,:,:)=mwork(:,:,:)
+            lplds(:,:,:)=mwork(:,:,:)
           end do
-          lplds(:,:,:)=lplds_(:,:,:)
+          ! lplds(:,:,:)=lplds_(:,:,:)
         end subroutine
 
         subroutine mkrscan_()
